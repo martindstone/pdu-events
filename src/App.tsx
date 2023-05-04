@@ -9,13 +9,22 @@ import {
   Input,
   Image,
   Box,
-  Select,
+  Text,
+  Wrap,
+  WrapItem,
   Button,
   FormControl,
   Stack,
   Code,
+  CheckboxGroup,
+  Checkbox,
+  FormLabel,
   useToast,
 } from '@chakra-ui/react'
+
+import {
+  EmailIcon,
+} from '@chakra-ui/icons'
 
 import events from './events';
 
@@ -23,11 +32,12 @@ import workingPagey from './Working-Pagey.png';
 
 function App() {
   const toast = useToast();
-  const [selectedValue, setSelectedValue] = useState('');
+  const [selectedValues, setSelectedValues] = useState([] as string[]);
   const [routingKey, setRoutingKey] = useState('');
 
   const toastWithMessage = (message: string, error = false) => {
     toast({
+      position: 'top',
       title: message,
       status: error ? 'error' : 'success',
       duration: 3000,
@@ -35,20 +45,28 @@ function App() {
     })
   };
 
-  const selectedEventContent = () => {
-    const event: any = events.find((event) => event.name === selectedValue);
-    return event ? event.event : {};
+  const selectedEventContents = () => {
+    const selectedEvents = events.filter((event) => selectedValues.includes(event.name));
+    return selectedEvents.map((event) => event.event);
   }
 
-  const selectedEventCodeBlock = () => (
+  const selectedEventsCodeBlocks = () => (
     <>
-      <h1>Selected Event:</h1>
-      <Code colorScheme="green" whiteSpace="pre" borderRadius={5}>{JSON.stringify(selectedEventContent(), null, 2)}</Code>
+      <Text mt={4}>Selected Events:</Text>
+      <Wrap>
+        {selectedEventContents().map((event) => (
+          <WrapItem>
+            <Code colorScheme="green" p={2} m={2} mb={2} borderRadius={10} whiteSpace="pre" shadow="md">
+              {JSON.stringify(event, null, 2)}
+            </Code>
+          </WrapItem>
+        ))}
+      </Wrap>
     </>
   );
 
-  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedValue(e.target.value);
+  const handleSelectChange = (values: string[]) => {
+    setSelectedValues(values);
   };
 
   const handleRoutingKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -57,7 +75,7 @@ function App() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!selectedValue) {
+    if (!selectedValues || selectedValues.length === 0) {
       toastWithMessage('Please select an event', true);
       return;
     }
@@ -65,28 +83,42 @@ function App() {
       toastWithMessage('Please enter a routing key', true);
       return;
     }
-    const event: any = selectedEventContent();
-    const postBody = {
+    const events: object[] = selectedEventContents();
+    const postBodies = events.map((event) => ({
       ...event,
       routing_key: routingKey,
+    }));
+    const results = {
+      success: 0,
+      failure: 0,
+      failureReasons: [] as string[],
     }
-    console.log(JSON.stringify(postBody, null, 2));
-    const result = await fetch(
-      'https://events.pagerduty.com/v2/enqueue',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(postBody),
+    for (const postBody of postBodies) {
+      const result = await fetch(
+        'https://events.pagerduty.com/v2/enqueue',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(postBody),
+        }
+      )
+      if (result.status !== 202) {
+        const errorBody = await result.text();
+        results.failure += 1;
+        results.failureReasons.push(errorBody);
+      } else {
+        results.success += 1;
       }
-    )
-    if (result.status !== 202) {
-      const errorBody = await result.text();
-      toastWithMessage(`Oops! PD said "${errorBody}"`, true);
-      return;
     }
-    toastWithMessage('Sent!');
+    if (results.success > 0) {
+      toastWithMessage(`Sent ${results.success} events!`);
+    }
+    if (results.failure > 0) {
+      const reasons = Array.from(new Set(results.failureReasons)).join(', ');
+      toastWithMessage(`Failed to send ${results.failure} events: ${reasons}`, true);
+    }
   }
 
   return (
@@ -102,34 +134,40 @@ function App() {
             </Flex>
           </Stack>
         </Box>
-        <Center>
-          <Box w="90%" p={4} color="black">
+        <Flex>
+          <Box w="30%" p={4} color="black">
             <form onSubmit={handleSubmit}>
-              <Stack direction="row" spacing={4}>
-                <FormControl>
-                  <Input placeholder="Routing Key" onChange={handleRoutingKeyChange} />
-                </FormControl>
-                <FormControl>
-                  <Select placeholder='Choose an event' value={selectedValue} onChange={handleSelectChange}>
-                    {events.map((event) => (
-                      <option key={event.name} value={event.name}>{event.name} - {event.description}</option>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Button type="submit">Send</Button>
-              </Stack>
+              <FormControl>
+                <FormLabel>Routing Key</FormLabel>
+                <Input placeholder="Routing Key" onChange={handleRoutingKeyChange} />
+              </FormControl>
+              <FormControl mt={6}>
+                <FormLabel>Events to send</FormLabel>
+                <CheckboxGroup colorScheme="green"
+                  defaultValue={[]}
+                  onChange={handleSelectChange}
+                >
+                  <Stack pl={1} m={1}>
+                    {events.map((event) => (<Checkbox key={event.name} value={event.name}>{event.description}</Checkbox>))};
+                  </Stack>
+                </CheckboxGroup>
+              </FormControl>
+              <Button
+                mt={6}
+                type="submit"
+                variant="solid"
+                colorScheme="green"
+                leftIcon={<EmailIcon />}
+                isDisabled={!selectedValues || selectedValues.length === 0 || !routingKey}
+              >
+                Send
+              </Button>
             </form>
           </Box>
-        </Center>
-      </div>
-      <div>
-        <Center>
-          <Box w="90%" p={4} borderRadius="20">
-            <Stack>
-              {selectedValue && selectedEventCodeBlock()}
-            </Stack>
+          <Box w="70%">
+            {selectedValues && selectedValues.length > 0 && selectedEventsCodeBlocks()}
           </Box>
-        </Center>
+        </Flex>
       </div>
     </ChakraProvider>
   );
